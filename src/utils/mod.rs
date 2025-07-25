@@ -1,9 +1,9 @@
-use std::path::Path;
+use chrono::Local;
 use std::fs::File;
 use std::io::Write;
-use chrono::Local;
+use std::path::Path;
 
-use crate::models::{Results, KeystoreResults};
+use crate::models::{KeystoreResults, Results};
 
 /// Create output directory if it doesn't exist
 pub fn ensure_output_dir(dir: &str) -> std::io::Result<()> {
@@ -16,14 +16,14 @@ pub fn ensure_output_dir(dir: &str) -> std::io::Result<()> {
 /// Generate a filename with timestamp and rule
 pub fn generate_filename(dir: &str, rule: &str) -> String {
     let timestamp = Local::now().format("%Y%m%d_%H%M%S").to_string();
-    format!("{}/eth_addresses_{}_{}.json", dir, timestamp, rule)
+    format!("{dir}/eth_addresses_{timestamp}_{rule}.json")
 }
 
 /// Save results to a JSON file
 pub fn save_results(
-    filename: &str, 
-    results: &Option<Results>, 
-    keystore_results: &Option<KeystoreResults>
+    filename: &str,
+    results: &Option<Results>,
+    keystore_results: &Option<KeystoreResults>,
 ) -> Result<(), String> {
     match File::create(filename) {
         Ok(mut file) => {
@@ -31,25 +31,25 @@ pub fn save_results(
             let json = if let Some(keystore_results) = keystore_results {
                 match serde_json::to_string_pretty(keystore_results) {
                     Ok(json) => json,
-                    Err(e) => return Err(format!("Error serializing keystore results: {}", e)),
+                    Err(e) => return Err(format!("Error serializing keystore results: {e}")),
                 }
             } else if let Some(results) = results {
                 match serde_json::to_string_pretty(results) {
                     Ok(json) => json,
-                    Err(e) => return Err(format!("Error serializing results: {}", e)),
+                    Err(e) => return Err(format!("Error serializing results: {e}")),
                 }
             } else {
                 return Err("No results to save".to_string());
             };
-            
+
             // Write the JSON to the file
             if let Err(e) = file.write_all(json.as_bytes()) {
-                return Err(format!("Error writing to file: {}", e));
+                return Err(format!("Error writing to file: {e}"));
             }
-            
-            println!("Results saved to {}", filename);
+
+            println!("Results saved to {filename}");
             Ok(())
-        },
-        Err(e) => Err(format!("Error creating file: {}", e)),
+        }
+        Err(e) => Err(format!("Error creating file: {e}")),
     }
 }

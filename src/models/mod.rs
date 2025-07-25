@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use secp256k1::SecretKey;
+use serde::{Deserialize, Serialize};
 
 /// Represents a key pair with private key and public address
 #[derive(Serialize, Deserialize, Debug, Clone)]

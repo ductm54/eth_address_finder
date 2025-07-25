@@ -3,18 +3,17 @@ use std::process;
 
 use chrono::Local;
 use clap::Parser;
-use dotenv;
+use dotenv::dotenv;
 
 use address_finder::{
-    Args, KeyPair, PublicAddressEntry, Results, KeystoreResults,
-    create_rule, print_search_info, get_password,
-    ensure_output_dir, generate_filename, find_addresses_parallel,
-    generate_keystore, save_results
+    create_rule, ensure_output_dir, find_addresses_parallel, generate_filename, generate_keystore,
+    get_password, print_search_info, save_results, Args, KeyPair, KeystoreResults,
+    PublicAddressEntry, Results,
 };
 
 fn main() {
     // Load environment variables from .env file if it exists
-    dotenv::dotenv().ok();
+    dotenv().ok();
 
     // Parse command line arguments
     let args = Args::parse();
@@ -27,15 +26,18 @@ fn main() {
 
     // Ensure output directory exists
     if let Err(e) = ensure_output_dir(&args.output_dir) {
-        eprintln!("Error creating output directory: {}", e);
+        eprintln!("Error creating output directory: {e}");
         process::exit(1);
     }
 
     // Determine keystore directory if keystore option is enabled
     let keystore_dir = if args.keystore {
-        let dir = args.keystore_dir.clone().unwrap_or_else(|| format!("{}/keystore", args.output_dir));
+        let dir = args
+            .keystore_dir
+            .clone()
+            .unwrap_or_else(|| format!("{}/keystore", args.output_dir));
         if let Err(e) = ensure_output_dir(&dir) {
-            eprintln!("Error creating keystore directory: {}", e);
+            eprintln!("Error creating keystore directory: {e}");
             process::exit(1);
         }
         Some(dir)
@@ -48,7 +50,7 @@ fn main() {
         match get_password() {
             Ok(pwd) => Some(pwd),
             Err(e) => {
-                eprintln!("Error getting password: {}", e);
+                eprintln!("Error getting password: {e}");
                 process::exit(1);
             }
         }
@@ -83,13 +85,12 @@ fn main() {
     };
 
     // Find matching addresses in parallel
-    println!("Searching for addresses with {} CPU threads...", args.threads);
-    let found_addresses = find_addresses_parallel(
-        args.count,
-        &args.prefix,
-        &args.suffix,
+    println!(
+        "Searching for addresses with {} CPU threads...",
         args.threads
     );
+    let found_addresses =
+        find_addresses_parallel(args.count, &args.prefix, &args.suffix, args.threads);
 
     // Process the found addresses
     for found in found_addresses {
@@ -112,7 +113,7 @@ fn main() {
                 let private_key_bytes = match hex::decode(&private_key_hex) {
                     Ok(bytes) => bytes,
                     Err(e) => {
-                        eprintln!("Error decoding private key: {}", e);
+                        eprintln!("Error decoding private key: {e}");
                         process::exit(1);
                     }
                 };
@@ -129,9 +130,9 @@ fn main() {
                                 keystore_file: path.display().to_string(),
                             });
                         }
-                    },
+                    }
                     Err(e) => {
-                        eprintln!("Error creating keystore file: {}", e);
+                        eprintln!("Error creating keystore file: {e}");
                         process::exit(1);
                     }
                 }
@@ -141,7 +142,7 @@ fn main() {
 
     // Save results to JSON file
     if let Err(e) = save_results(&filename, &standard_results, &keystore_results) {
-        eprintln!("{}", e);
+        eprintln!("{e}");
         process::exit(1);
     }
 }
