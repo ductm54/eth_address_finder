@@ -122,58 +122,80 @@ pub fn private_key_to_address(private_key: &SecretKey) -> String {
     address_to_hex(&private_key_to_address_bytes(private_key))
 }
 
-/// Pre-decoded prefix/suffix nibbles, so the hot loop never re-lowercases or
-/// re-decodes anything per candidate.
+/// Pre-decoded prefix/suffix alternatives, so the hot loop never re-lowercases
+/// or re-decodes anything per candidate. Each side holds zero-or-more
+/// alternatives; an address matches if it satisfies *any* prefix alternative
+/// AND *any* suffix alternative (with an empty list meaning "no constraint").
 #[derive(Debug, Clone)]
 pub struct MatchRule {
-    prefix_nibbles: Vec<u8>,
-    suffix_nibbles: Vec<u8>,
+    prefix_alts: Vec<Vec<u8>>,
+    suffix_alts: Vec<Vec<u8>>,
 }
 
 impl MatchRule {
-    /// Build a rule from the CLI-style `Option<String>` prefix/suffix.
-    /// Non-hex characters or overly long inputs return an error.
-    pub fn new(prefix: Option<&str>, suffix: Option<&str>) -> Result<Self, String> {
-        let prefix_nibbles = match prefix {
-            Some(p) => decode_nibbles(p)?,
-            None => Vec::new(),
-        };
-        let suffix_nibbles = match suffix {
-            Some(s) => decode_nibbles(s)?,
-            None => Vec::new(),
-        };
-        if prefix_nibbles.len() + suffix_nibbles.len() > 40 {
+    /// Build a rule from lists of alternative prefix/suffix hex strings.
+    /// An empty slice means "no constraint on this side". Non-hex characters
+    /// or overly long inputs return an error.
+    pub fn new<S: AsRef<str>>(prefixes: &[S], suffixes: &[S]) -> Result<Self, String> {
+        let prefix_alts = decode_alts(prefixes)?;
+        let suffix_alts = decode_alts(suffixes)?;
+        let max_prefix = prefix_alts.iter().map(Vec::len).max().unwrap_or(0);
+        let max_suffix = suffix_alts.iter().map(Vec::len).max().unwrap_or(0);
+        if max_prefix + max_suffix > 40 {
             return Err(format!(
-                "prefix + suffix length exceeds 40 hex chars (got {} + {})",
-                prefix_nibbles.len(),
-                suffix_nibbles.len()
+                "prefix + suffix length exceeds 40 hex chars (got {max_prefix} + {max_suffix})"
             ));
         }
         Ok(Self {
-            prefix_nibbles,
-            suffix_nibbles,
+            prefix_alts,
+            suffix_alts,
         })
     }
 
-    /// Returns true if `address` begins with the prefix nibbles and ends
-    /// with the suffix nibbles. A match with no constraints returns true.
+    /// Returns true if `address` matches one of the prefix alternatives (or
+    /// no prefix is required) AND one of the suffix alternatives (or none is
+    /// required).
     #[inline]
     pub fn matches(&self, address: &[u8; 20]) -> bool {
-        // Prefix check.
-        for (i, &want) in self.prefix_nibbles.iter().enumerate() {
-            if nibble_at(address, i) != want {
-                return false;
-            }
+        let prefix_ok = self.prefix_alts.is_empty()
+            || self
+                .prefix_alts
+                .iter()
+                .any(|alt| matches_prefix(address, alt));
+        if !prefix_ok {
+            return false;
         }
-        // Suffix check — align to the right end (position 39 is the last nibble).
-        let suffix_len = self.suffix_nibbles.len();
-        for (i, &want) in self.suffix_nibbles.iter().enumerate() {
-            if nibble_at(address, 40 - suffix_len + i) != want {
-                return false;
-            }
-        }
-        true
+        self.suffix_alts.is_empty()
+            || self
+                .suffix_alts
+                .iter()
+                .any(|alt| matches_suffix(address, alt))
     }
+}
+
+#[inline]
+fn matches_prefix(address: &[u8; 20], alt: &[u8]) -> bool {
+    for (i, &want) in alt.iter().enumerate() {
+        if nibble_at(address, i) != want {
+            return false;
+        }
+    }
+    true
+}
+
+#[inline]
+fn matches_suffix(address: &[u8; 20], alt: &[u8]) -> bool {
+    let len = alt.len();
+    for (i, &want) in alt.iter().enumerate() {
+        if nibble_at(address, 40 - len + i) != want {
+            return false;
+        }
+    }
+    true
+}
+
+fn decode_alts<S: AsRef<str>>(alts: &[S]) -> Result<Vec<Vec<u8>>, String> {
+    alts.iter().map(|s| decode_nibbles(s.as_ref())).collect()
 }
 
 #[inline]
@@ -206,7 +228,9 @@ fn decode_nibbles(s: &str) -> Result<Vec<u8>, String> {
 ///
 /// Allocates; prefer [`MatchRule::matches`] in hot code.
 pub fn address_matches(address: &str, prefix: &Option<String>, suffix: &Option<String>) -> bool {
-    let rule = match MatchRule::new(prefix.as_deref(), suffix.as_deref()) {
+    let prefixes: Vec<&str> = prefix.as_deref().into_iter().collect();
+    let suffixes: Vec<&str> = suffix.as_deref().into_iter().collect();
+    let rule = match MatchRule::new(&prefixes, &suffixes) {
         Ok(r) => r,
         Err(_) => return false,
     };
@@ -232,18 +256,23 @@ mod tests {
         assert_eq!(hex_direct, via_bytes);
     }
 
+    fn one(s: &str) -> Vec<&str> {
+        vec![s]
+    }
+    const NONE: &[&str] = &[];
+
     #[test]
     fn match_rule_prefix_and_suffix() {
         let mut addr = [0u8; 20];
         addr[0] = 0xab;
         addr[19] = 0xcd;
-        let rule = MatchRule::new(Some("ab"), Some("cd")).unwrap();
+        let rule = MatchRule::new(&one("ab"), &one("cd")).unwrap();
         assert!(rule.matches(&addr));
 
-        let rule = MatchRule::new(Some("ab"), Some("ce")).unwrap();
+        let rule = MatchRule::new(&one("ab"), &one("ce")).unwrap();
         assert!(!rule.matches(&addr));
 
-        let rule = MatchRule::new(Some("abc"), None).unwrap();
+        let rule = MatchRule::new(&one("abc"), NONE).unwrap();
         assert!(!rule.matches(&addr)); // third nibble is 0, not c
     }
 
@@ -256,13 +285,77 @@ mod tests {
         let mut addr = [0u8; 20];
         addr[18] = 0xab;
         addr[19] = 0xcd;
-        assert!(MatchRule::new(None, Some("bcd")).unwrap().matches(&addr));
-        assert!(!MatchRule::new(None, Some("acd")).unwrap().matches(&addr));
+        assert!(MatchRule::new(NONE, &one("bcd")).unwrap().matches(&addr));
+        assert!(!MatchRule::new(NONE, &one("acd")).unwrap().matches(&addr));
     }
 
     #[test]
     fn match_rule_rejects_non_hex() {
-        assert!(MatchRule::new(Some("xyz"), None).is_err());
+        assert!(MatchRule::new(&one("xyz"), NONE).is_err());
+    }
+
+    #[test]
+    fn match_rule_multi_suffix_matches_any_alt() {
+        // Only the last 3 nibbles matter. Build addresses ending in each
+        // alternative and verify they all match the same rule.
+        let rule = MatchRule::new(NONE, &["001", "002", "003"]).unwrap();
+
+        for (last_byte_high, last_byte_low, expected) in [
+            (0x00u8, 0x01u8, true), // ends in ...001
+            (0x00, 0x02, true),     // ...002
+            (0x00, 0x03, true),     // ...003
+            (0x00, 0x04, false),    // ...004 should not match
+        ] {
+            let mut addr = [0u8; 20];
+            addr[18] = last_byte_high;
+            addr[19] = last_byte_low;
+            assert_eq!(rule.matches(&addr), expected, "addr={addr:?}");
+        }
+    }
+
+    #[test]
+    fn match_rule_multi_prefix_matches_any_alt() {
+        let rule = MatchRule::new(&["ab", "cd"], NONE).unwrap();
+        let mut a = [0u8; 20];
+        a[0] = 0xab;
+        assert!(rule.matches(&a));
+        let mut b = [0u8; 20];
+        b[0] = 0xcd;
+        assert!(rule.matches(&b));
+        let mut c = [0u8; 20];
+        c[0] = 0xef;
+        assert!(!rule.matches(&c));
+    }
+
+    #[test]
+    fn match_rule_multi_requires_prefix_and_suffix_alt() {
+        // Both sides must hit *one* alternative each.
+        let rule = MatchRule::new(&["ab", "cd"], &["01", "02"]).unwrap();
+        let mut ok = [0u8; 20];
+        ok[0] = 0xcd;
+        ok[19] = 0x02;
+        assert!(rule.matches(&ok));
+
+        let mut wrong_suffix = [0u8; 20];
+        wrong_suffix[0] = 0xab;
+        wrong_suffix[19] = 0x03;
+        assert!(!rule.matches(&wrong_suffix));
+
+        let mut wrong_prefix = [0u8; 20];
+        wrong_prefix[0] = 0xef;
+        wrong_prefix[19] = 0x01;
+        assert!(!rule.matches(&wrong_prefix));
+    }
+
+    #[test]
+    fn match_rule_length_limit_uses_longest_alt() {
+        // 40-nibble prefix alt plus any non-empty suffix must exceed the budget.
+        let long_prefix = "a".repeat(40);
+        assert!(MatchRule::new(&[long_prefix.as_str()], &["0"]).is_err());
+        // Within budget: 30 + 10 is fine.
+        let p = "a".repeat(30);
+        let s = "b".repeat(10);
+        assert!(MatchRule::new(&[p.as_str()], &[s.as_str()]).is_ok());
     }
 
     #[test]
@@ -286,7 +379,7 @@ mod tests {
 
     #[test]
     fn match_rule_accepts_0x_prefix() {
-        let rule = MatchRule::new(Some("0xab"), None).unwrap();
+        let rule = MatchRule::new(&one("0xab"), NONE).unwrap();
         let mut addr = [0u8; 20];
         addr[0] = 0xab;
         assert!(rule.matches(&addr));

@@ -2,10 +2,9 @@ use clap::Parser;
 use rpassword;
 use std::io;
 
-/// Validate a hex string for use as an address prefix/suffix. Accepts an
-/// optional `0x` prefix, normalizes to lowercase, and rejects anything that
-/// can't possibly match an Ethereum address.
-fn parse_hex_pattern(s: &str) -> Result<String, String> {
+/// Validate a single hex segment for use as an address prefix/suffix. Accepts
+/// an optional `0x` prefix and normalizes to lowercase.
+fn parse_hex_segment(s: &str) -> Result<String, String> {
     let trimmed = s.strip_prefix("0x").unwrap_or(s);
     if trimmed.is_empty() {
         return Err("empty hex pattern".to_string());
@@ -28,13 +27,28 @@ fn parse_hex_pattern(s: &str) -> Result<String, String> {
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
-    /// Prefix for Ethereum address (without 0x)
-    #[arg(short, long, env = "ETH_PREFIX", value_parser = parse_hex_pattern)]
-    pub prefix: Option<String>,
+    /// Prefix for Ethereum address (without 0x). Use `|` to pass multiple
+    /// alternatives, e.g. `--prefix ab|cd` matches addresses starting with
+    /// either `ab` or `cd`.
+    #[arg(
+        short,
+        long,
+        env = "ETH_PREFIX",
+        value_delimiter = '|',
+        value_parser = parse_hex_segment,
+    )]
+    pub prefix: Option<Vec<String>>,
 
-    /// Suffix for Ethereum address (without 0x)
-    #[arg(short, long, env = "ETH_SUFFIX", value_parser = parse_hex_pattern)]
-    pub suffix: Option<String>,
+    /// Suffix for Ethereum address (without 0x). Use `|` to pass multiple
+    /// alternatives, e.g. `--suffix 001|002|003`.
+    #[arg(
+        short,
+        long,
+        env = "ETH_SUFFIX",
+        value_delimiter = '|',
+        value_parser = parse_hex_segment,
+    )]
+    pub suffix: Option<Vec<String>>,
 
     /// Number of matching addresses to find
     #[arg(short, long, default_value = "1", env = "ETH_COUNT")]
@@ -82,25 +96,29 @@ pub fn get_password() -> io::Result<String> {
     Ok(password)
 }
 
-/// Create a rule string for the filename based on prefix and suffix
-pub fn create_rule(prefix: &Option<String>, suffix: &Option<String>) -> String {
-    match (prefix, suffix) {
-        (Some(prefix), Some(suffix)) => format!("prefix_{prefix}_suffix_{suffix}"),
-        (Some(prefix), None) => format!("prefix_{prefix}"),
-        (None, Some(suffix)) => format!("suffix_{suffix}"),
+/// Create a rule string for the filename based on prefix and suffix. Multiple
+/// alternatives are joined with `-` rather than `|`, since pipes aren't
+/// filesystem-safe on Windows.
+pub fn create_rule(prefix: &Option<Vec<String>>, suffix: &Option<Vec<String>>) -> String {
+    let prefix_str = prefix.as_deref().map(|alts| alts.join("-"));
+    let suffix_str = suffix.as_deref().map(|alts| alts.join("-"));
+    match (prefix_str, suffix_str) {
+        (Some(p), Some(s)) => format!("prefix_{p}_suffix_{s}"),
+        (Some(p), None) => format!("prefix_{p}"),
+        (None, Some(s)) => format!("suffix_{s}"),
         (None, None) => "no_rule".to_string(),
     }
 }
 
 /// Print information about the search criteria
-pub fn print_search_info(prefix: &Option<String>, suffix: &Option<String>, count: usize) {
+pub fn print_search_info(prefix: &Option<Vec<String>>, suffix: &Option<Vec<String>>, count: usize) {
     println!("Ethereum Address Finder");
     println!("Looking for addresses with:");
     if let Some(prefix) = prefix {
-        println!("  Prefix: {prefix}");
+        println!("  Prefix: {}", prefix.join(", "));
     }
     if let Some(suffix) = suffix {
-        println!("  Suffix: {suffix}");
+        println!("  Suffix: {}", suffix.join(", "));
     }
     println!("Finding {count} matching addresses...");
 }
@@ -110,30 +128,66 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_hex_pattern_accepts_valid() {
-        assert_eq!(parse_hex_pattern("abc").unwrap(), "abc");
-        assert_eq!(parse_hex_pattern("0xABC").unwrap(), "abc");
+    fn parse_hex_segment_accepts_valid() {
+        assert_eq!(parse_hex_segment("abc").unwrap(), "abc");
+        assert_eq!(parse_hex_segment("0xABC").unwrap(), "abc");
         assert_eq!(
-            parse_hex_pattern("0123456789abcdef").unwrap(),
+            parse_hex_segment("0123456789abcdef").unwrap(),
             "0123456789abcdef"
         );
     }
 
     #[test]
-    fn parse_hex_pattern_rejects_non_hex() {
-        assert!(parse_hex_pattern("xyz").is_err());
-        assert!(parse_hex_pattern("ab z").is_err());
+    fn parse_hex_segment_rejects_non_hex() {
+        assert!(parse_hex_segment("xyz").is_err());
+        assert!(parse_hex_segment("ab z").is_err());
     }
 
     #[test]
-    fn parse_hex_pattern_rejects_empty() {
-        assert!(parse_hex_pattern("").is_err());
-        assert!(parse_hex_pattern("0x").is_err());
+    fn parse_hex_segment_rejects_empty() {
+        assert!(parse_hex_segment("").is_err());
+        assert!(parse_hex_segment("0x").is_err());
     }
 
     #[test]
-    fn parse_hex_pattern_rejects_too_long() {
+    fn parse_hex_segment_rejects_too_long() {
         let too_long = "a".repeat(41);
-        assert!(parse_hex_pattern(&too_long).is_err());
+        assert!(parse_hex_segment(&too_long).is_err());
+    }
+
+    #[test]
+    fn args_accepts_pipe_separated_suffix() {
+        let args = Args::try_parse_from(["prog", "--suffix", "001|002|003"]).unwrap();
+        assert_eq!(
+            args.suffix,
+            Some(vec![
+                "001".to_string(),
+                "002".to_string(),
+                "003".to_string()
+            ])
+        );
+    }
+
+    #[test]
+    fn args_accepts_single_suffix() {
+        let args = Args::try_parse_from(["prog", "--suffix", "0xDEAD"]).unwrap();
+        assert_eq!(args.suffix, Some(vec!["dead".to_string()]));
+    }
+
+    #[test]
+    fn args_rejects_empty_segment() {
+        assert!(Args::try_parse_from(["prog", "--suffix", "001||002"]).is_err());
+        assert!(Args::try_parse_from(["prog", "--suffix", "|001"]).is_err());
+        assert!(Args::try_parse_from(["prog", "--suffix", "001|"]).is_err());
+    }
+
+    #[test]
+    fn create_rule_joins_alternatives_with_dash() {
+        let p = Some(vec!["ab".to_string(), "cd".to_string()]);
+        let s = Some(vec!["01".to_string(), "02".to_string(), "03".to_string()]);
+        assert_eq!(create_rule(&p, &s), "prefix_ab-cd_suffix_01-02-03");
+        assert_eq!(create_rule(&None, &s), "suffix_01-02-03");
+        assert_eq!(create_rule(&p, &None), "prefix_ab-cd");
+        assert_eq!(create_rule(&None, &None), "no_rule");
     }
 }

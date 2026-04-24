@@ -29,8 +29,8 @@ fn format_duration(duration: Duration) -> String {
 /// Find addresses in parallel
 pub fn find_addresses_parallel(
     count: usize,
-    prefix: &Option<String>,
-    suffix: &Option<String>,
+    prefix: &Option<Vec<String>>,
+    suffix: &Option<Vec<String>>,
     threads: usize,
 ) -> Vec<FoundAddress> {
     let thread_count = if threads > 0 {
@@ -76,7 +76,9 @@ pub fn find_addresses_parallel(
         io::stdout().flush().unwrap();
     });
 
-    let rule = match MatchRule::new(prefix.as_deref(), suffix.as_deref()) {
+    let prefixes: &[String] = prefix.as_deref().unwrap_or(&[]);
+    let suffixes: &[String] = suffix.as_deref().unwrap_or(&[]);
+    let rule = match MatchRule::new(prefixes, suffixes) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("Invalid prefix/suffix: {e}");
@@ -172,7 +174,7 @@ mod tests {
         // Prefix "0" matches ~1/16 of addresses, so this completes quickly
         // but still exercises the real hot loop and the race-resolution
         // around the last slot.
-        let found = find_addresses_parallel(5, &Some("0".to_string()), &None, 4);
+        let found = find_addresses_parallel(5, &Some(vec!["0".to_string()]), &None, 4);
         assert_eq!(
             found.len(),
             5,

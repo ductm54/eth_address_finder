@@ -64,14 +64,14 @@ fn bench_derive_bytes(c: &mut Criterion) {
 fn bench_rule_reject(c: &mut Criterion) {
     let key = generate_private_key();
     let addr = private_key_to_address_bytes(&key);
-    let rule = MatchRule::new(Some("0123456789"), None).unwrap();
+    let rule = MatchRule::new(&["0123456789"], &[] as &[&str]).unwrap();
     c.bench_function("rule_reject", |b| {
         b.iter(|| black_box(rule.matches(black_box(&addr))));
     });
 }
 
 fn bench_pipeline_single_bytes(c: &mut Criterion) {
-    let rule = MatchRule::new(Some("0123456789"), None).unwrap();
+    let rule = MatchRule::new(&["0123456789"], &[] as &[&str]).unwrap();
     c.bench_function("pipeline_single_bytes", |b| {
         b.iter(|| {
             let key = generate_private_key();
@@ -82,7 +82,7 @@ fn bench_pipeline_single_bytes(c: &mut Criterion) {
 }
 
 fn bench_pipeline_incremental(c: &mut Criterion) {
-    let rule = MatchRule::new(Some("0123456789"), None).unwrap();
+    let rule = MatchRule::new(&["0123456789"], &[] as &[&str]).unwrap();
     c.bench_function("pipeline_incremental", |b| {
         let mut kg = IncrementalKeygen::new();
         b.iter(|| {
@@ -97,7 +97,7 @@ fn bench_pipeline_incremental(c: &mut Criterion) {
 fn bench_pipeline_multi(c: &mut Criterion) {
     // Fixed batch so criterion reports throughput as addresses-per-second.
     const BATCH: u64 = 4096;
-    let rule = MatchRule::new(Some("0123456789"), None).unwrap();
+    let rule = MatchRule::new(&["0123456789"], &[] as &[&str]).unwrap();
 
     let mut group = c.benchmark_group("pipeline_multi");
     group.throughput(Throughput::Elements(BATCH));
@@ -124,7 +124,7 @@ fn bench_pipeline_multi(c: &mut Criterion) {
 
 fn bench_pipeline_multi_incremental(c: &mut Criterion) {
     const BATCH: u64 = 65_536; // larger batch — each candidate is ~10× cheaper
-    let rule = MatchRule::new(Some("0123456789"), None).unwrap();
+    let rule = MatchRule::new(&["0123456789"], &[] as &[&str]).unwrap();
 
     let mut group = c.benchmark_group("pipeline_multi_incremental");
     group.throughput(Throughput::Elements(BATCH));

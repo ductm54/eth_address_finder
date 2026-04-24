@@ -37,19 +37,19 @@ cargo build --release
 Basic usage:
 
 ```bash
-cargo run -- --prefix abc --suffix def --count 5
+cargo run --release -- --prefix abc --suffix def --count 5
 ```
 
 Using multiple CPU cores for faster processing:
 
 ```bash
-cargo run -- --prefix abc --suffix def --count 5 --threads 4
+cargo run --release -- --prefix abc --suffix def --count 5 --threads 4
 ```
 
 Using all available CPU cores:
 
 ```bash
-cargo run -- --prefix abc --suffix def --count 5 --threads 0
+cargo run --release -- --prefix abc --suffix def --count 5 --threads 0
 ```
 
 Or using the compiled binary:
@@ -137,7 +137,7 @@ UTC--20230920153045--abc123def456...
 To generate keystore files, use the `--keystore` flag:
 
 ```bash
-cargo run -- --prefix abc --suffix def --count 1 -e
+cargo run --release -- --prefix abc --suffix def --count 1 -e
 ```
 
 The program will prompt you to enter and confirm a password, which will be used to encrypt the private keys. This password will be required to access the private keys in the future.
