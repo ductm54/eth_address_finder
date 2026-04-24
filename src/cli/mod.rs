@@ -2,16 +2,38 @@ use clap::Parser;
 use rpassword;
 use std::io;
 
+/// Validate a hex string for use as an address prefix/suffix. Accepts an
+/// optional `0x` prefix, normalizes to lowercase, and rejects anything that
+/// can't possibly match an Ethereum address.
+fn parse_hex_pattern(s: &str) -> Result<String, String> {
+    let trimmed = s.strip_prefix("0x").unwrap_or(s);
+    if trimmed.is_empty() {
+        return Err("empty hex pattern".to_string());
+    }
+    if trimmed.len() > 40 {
+        return Err(format!(
+            "hex pattern longer than 40 characters (got {})",
+            trimmed.len()
+        ));
+    }
+    for (idx, c) in trimmed.chars().enumerate() {
+        if !c.is_ascii_hexdigit() {
+            return Err(format!("non-hex character {c:?} at position {idx}"));
+        }
+    }
+    Ok(trimmed.to_ascii_lowercase())
+}
+
 /// Command-line arguments for the application
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
     /// Prefix for Ethereum address (without 0x)
-    #[arg(short, long, env = "ETH_PREFIX")]
+    #[arg(short, long, env = "ETH_PREFIX", value_parser = parse_hex_pattern)]
     pub prefix: Option<String>,
 
     /// Suffix for Ethereum address (without 0x)
-    #[arg(short, long, env = "ETH_SUFFIX")]
+    #[arg(short, long, env = "ETH_SUFFIX", value_parser = parse_hex_pattern)]
     pub suffix: Option<String>,
 
     /// Number of matching addresses to find
@@ -81,4 +103,37 @@ pub fn print_search_info(prefix: &Option<String>, suffix: &Option<String>, count
         println!("  Suffix: {suffix}");
     }
     println!("Finding {count} matching addresses...");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_hex_pattern_accepts_valid() {
+        assert_eq!(parse_hex_pattern("abc").unwrap(), "abc");
+        assert_eq!(parse_hex_pattern("0xABC").unwrap(), "abc");
+        assert_eq!(
+            parse_hex_pattern("0123456789abcdef").unwrap(),
+            "0123456789abcdef"
+        );
+    }
+
+    #[test]
+    fn parse_hex_pattern_rejects_non_hex() {
+        assert!(parse_hex_pattern("xyz").is_err());
+        assert!(parse_hex_pattern("ab z").is_err());
+    }
+
+    #[test]
+    fn parse_hex_pattern_rejects_empty() {
+        assert!(parse_hex_pattern("").is_err());
+        assert!(parse_hex_pattern("0x").is_err());
+    }
+
+    #[test]
+    fn parse_hex_pattern_rejects_too_long() {
+        let too_long = "a".repeat(41);
+        assert!(parse_hex_pattern(&too_long).is_err());
+    }
 }

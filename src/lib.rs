@@ -7,7 +7,10 @@ pub mod utils;
 
 // Re-export commonly used items
 pub use cli::{create_rule, get_password, print_search_info, Args};
-pub use crypto::{address_matches, generate_private_key, private_key_to_address};
+pub use crypto::{
+    address_matches, address_to_hex, generate_private_key, private_key_to_address,
+    private_key_to_address_bytes, IncrementalKeygen, MatchRule,
+};
 pub use finder::find_addresses_parallel;
 pub use keystore::generate_keystore;
 pub use models::{FoundAddress, KeyPair, KeystoreResults, PublicAddressEntry, Results};
