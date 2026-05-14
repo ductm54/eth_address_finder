@@ -23,32 +23,42 @@ fn parse_hex_segment(s: &str) -> Result<String, String> {
     Ok(trimmed.to_ascii_lowercase())
 }
 
+/// Validate a comma-separated list of hex patterns (e.g. `001,002,003`).
+/// Returns a normalized comma-joined string; empty segments are rejected.
+/// We parse the entire string ourselves rather than relying on clap's
+/// `value_delimiter`, which has inconsistent behaviour across platforms.
+fn parse_hex_patterns(s: &str) -> Result<String, String> {
+    let mut out = Vec::new();
+    for seg in s.split(',') {
+        if seg.is_empty() {
+            return Err("empty alternative in comma-separated pattern".to_string());
+        }
+        out.push(parse_hex_segment(seg)?);
+    }
+    Ok(out.join(","))
+}
+
+/// Expand a normalized comma-joined pattern string (as stored in `Args`) into
+/// a `Vec<String>` suitable for `MatchRule`, `create_rule`, etc.
+pub fn expand_arg(s: &Option<String>) -> Option<Vec<String>> {
+    s.as_deref()
+        .map(|raw| raw.split(',').map(String::from).collect())
+}
+
 /// Command-line arguments for the application
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
-    /// Prefix for Ethereum address (without 0x). Use `|` to pass multiple
-    /// alternatives, e.g. `--prefix ab|cd` matches addresses starting with
+    /// Prefix for Ethereum address (without 0x). Use `,` to pass multiple
+    /// alternatives, e.g. `--prefix ab,cd` matches addresses starting with
     /// either `ab` or `cd`.
-    #[arg(
-        short,
-        long,
-        env = "ETH_PREFIX",
-        value_delimiter = '|',
-        value_parser = parse_hex_segment,
-    )]
-    pub prefix: Option<Vec<String>>,
+    #[arg(short, long, env = "ETH_PREFIX", value_parser = parse_hex_patterns)]
+    pub prefix: Option<String>,
 
-    /// Suffix for Ethereum address (without 0x). Use `|` to pass multiple
-    /// alternatives, e.g. `--suffix 001|002|003`.
-    #[arg(
-        short,
-        long,
-        env = "ETH_SUFFIX",
-        value_delimiter = '|',
-        value_parser = parse_hex_segment,
-    )]
-    pub suffix: Option<Vec<String>>,
+    /// Suffix for Ethereum address (without 0x). Use `,` to pass multiple
+    /// alternatives, e.g. `--suffix 001,002,003`.
+    #[arg(short, long, env = "ETH_SUFFIX", value_parser = parse_hex_patterns)]
+    pub suffix: Option<String>,
 
     /// Number of matching addresses to find
     #[arg(short, long, default_value = "1", env = "ETH_COUNT")]
@@ -97,7 +107,7 @@ pub fn get_password() -> io::Result<String> {
 }
 
 /// Create a rule string for the filename based on prefix and suffix. Multiple
-/// alternatives are joined with `-` rather than `|`, since pipes aren't
+/// alternatives are joined with `-` rather than `,`, since commas aren't
 /// filesystem-safe on Windows.
 pub fn create_rule(prefix: &Option<Vec<String>>, suffix: &Option<Vec<String>>) -> String {
     let prefix_str = prefix.as_deref().map(|alts| alts.join("-"));
@@ -156,10 +166,11 @@ mod tests {
     }
 
     #[test]
-    fn args_accepts_pipe_separated_suffix() {
-        let args = Args::try_parse_from(["prog", "--suffix", "001|002|003"]).unwrap();
+    fn args_accepts_comma_separated_suffix() {
+        let args = Args::try_parse_from(["prog", "--suffix", "001,002,003"]).unwrap();
+        assert_eq!(args.suffix, Some("001,002,003".to_string()));
         assert_eq!(
-            args.suffix,
+            expand_arg(&args.suffix),
             Some(vec![
                 "001".to_string(),
                 "002".to_string(),
@@ -171,14 +182,20 @@ mod tests {
     #[test]
     fn args_accepts_single_suffix() {
         let args = Args::try_parse_from(["prog", "--suffix", "0xDEAD"]).unwrap();
-        assert_eq!(args.suffix, Some(vec!["dead".to_string()]));
+        assert_eq!(args.suffix, Some("dead".to_string()));
+        assert_eq!(expand_arg(&args.suffix), Some(vec!["dead".to_string()]));
     }
 
     #[test]
     fn args_rejects_empty_segment() {
-        assert!(Args::try_parse_from(["prog", "--suffix", "001||002"]).is_err());
-        assert!(Args::try_parse_from(["prog", "--suffix", "|001"]).is_err());
-        assert!(Args::try_parse_from(["prog", "--suffix", "001|"]).is_err());
+        assert!(Args::try_parse_from(["prog", "--suffix", "001,,002"]).is_err());
+        assert!(Args::try_parse_from(["prog", "--suffix", ",001"]).is_err());
+        assert!(Args::try_parse_from(["prog", "--suffix", "001,"]).is_err());
+    }
+
+    #[test]
+    fn args_rejects_non_hex_segment() {
+        assert!(Args::try_parse_from(["prog", "--suffix", "001,xyz"]).is_err());
     }
 
     #[test]

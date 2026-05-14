@@ -6,7 +6,7 @@ pub mod models;
 pub mod utils;
 
 // Re-export commonly used items
-pub use cli::{create_rule, get_password, print_search_info, Args};
+pub use cli::{create_rule, expand_arg, get_password, print_search_info, Args};
 pub use crypto::{
     address_matches, address_to_hex, generate_private_key, private_key_to_address,
     private_key_to_address_bytes, IncrementalKeygen, MatchRule,

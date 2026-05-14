@@ -6,9 +6,9 @@ use clap::Parser;
 use dotenv::dotenv;
 
 use address_finder::{
-    create_rule, ensure_output_dir, find_addresses_parallel, generate_filename, generate_keystore,
-    get_password, print_search_info, save_results, Args, KeyPair, KeystoreResults,
-    PublicAddressEntry, Results,
+    create_rule, ensure_output_dir, expand_arg, find_addresses_parallel, generate_filename,
+    generate_keystore, get_password, print_search_info, save_results, Args, KeyPair,
+    KeystoreResults, PublicAddressEntry, Results,
 };
 
 fn main() {
@@ -18,11 +18,15 @@ fn main() {
     // Parse command line arguments
     let args = Args::parse();
 
+    // Expand comma-separated prefix/suffix strings into Vec<String> alternatives.
+    let prefix = expand_arg(&args.prefix);
+    let suffix = expand_arg(&args.suffix);
+
     // Create a rule string for the filename
-    let rule = create_rule(&args.prefix, &args.suffix);
+    let rule = create_rule(&prefix, &suffix);
 
     // Print information about the search
-    print_search_info(&args.prefix, &args.suffix, args.count);
+    print_search_info(&prefix, &suffix, args.count);
 
     // Ensure output directory exists
     if let Err(e) = ensure_output_dir(&args.output_dir) {
@@ -89,8 +93,7 @@ fn main() {
         "Searching for addresses with {} CPU threads...",
         args.threads
     );
-    let found_addresses =
-        find_addresses_parallel(args.count, &args.prefix, &args.suffix, args.threads);
+    let found_addresses = find_addresses_parallel(args.count, &prefix, &suffix, args.threads);
 
     // Process the found addresses
     for found in found_addresses {
